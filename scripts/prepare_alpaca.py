@@ -26,7 +26,8 @@ def prepare(
     data_file_name: str = "alpaca_data_cleaned_archive.json",
     data_file_url: str = "https://raw.githubusercontent.com/tloen/alpaca-lora/main/alpaca_data_cleaned_archive.json",
     ignore_index: int = -1,
-    max_seq_length: Optional[int] = None,
+    #max_seq_length: Optional[int] = None,
+    max_seq_length: Optional[int] = 2048, ## RS patch
 ) -> None:
     """Prepare the Alpaca dataset for instruction tuning.
 

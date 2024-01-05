@@ -11,6 +11,10 @@ from lightning.fabric.plugins import BitsandbytesPrecision
 from lightning.fabric.strategies import FSDPStrategy
 from lightning.fabric.utilities import ThroughputMonitor
 
+import wandb
+
+
+
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
 sys.path.append(str(wd))
@@ -109,6 +113,7 @@ def main(fabric: L.Fabric, data_dir: Path, checkpoint_dir: Path, out_dir: Path) 
 
     if not any((lora_query, lora_key, lora_value, lora_projection, lora_mlp, lora_head)):
         fabric.print("Warning: all LoRA layers are disabled!")
+
     config = Config.from_name(
         name=checkpoint_dir.name,
         r=lora_r,
@@ -121,11 +126,16 @@ def main(fabric: L.Fabric, data_dir: Path, checkpoint_dir: Path, out_dir: Path) 
         to_mlp=lora_mlp,
         to_head=lora_head,
     )
+
+    wandb.init(project="Lora train 1 TinyLama Alpaca", name="run alpha="+str(config.alpha)+" r="+str(config.r), config=wandb.config)
+
     checkpoint_path = checkpoint_dir / "lit_model.pth"
     fabric.print(f"Loading model {str(checkpoint_path)!r} with {config.__dict__}")
+
     with fabric.init_module(empty_init=(devices > 1)):
         model = GPT(config)
     mark_only_lora_as_trainable(model)
+
 
     fabric.print(f"Number of trainable parameters: {num_parameters(model, requires_grad=True):,}")
     fabric.print(f"Number of non trainable parameters: {num_parameters(model, requires_grad=False):,}")
@@ -217,10 +227,18 @@ def train(
                 time=t1 - total_t0, batches=iter_num, samples=iter_num * micro_batch_size, lengths=total_lengths
             )
             throughput.compute_and_log(step=iter_num)
+
+
             fabric.print(
                 f"iter {iter_num} step {step_count}: loss {loss_item:.4f}, iter time:"
                 f" {(t1 - iter_t0) * 1000:.2f}ms{' (optimizer.step)' if not is_accumulating else ''}"
             )
+
+            wandb.log({
+                "iter": iter_num,
+                "train/loss": loss_item,
+                "lr": lr
+            })
 
         if not is_accumulating and step_count % eval_interval == 0:
             t0 = time.perf_counter()
@@ -228,6 +246,12 @@ def train(
             t1 = time.perf_counter() - t0
             fabric.print(f"step {iter_num}: val loss {val_loss.item():.4f}, val time: {t1 * 1000:.2f}ms")
             fabric.barrier()
+            wandb.log({
+                "iter": iter_num,
+                "train/loss": loss_item,
+                "lr": lr,
+                "vall loss": val_loss.item()
+            })
         if not is_accumulating and step_count % save_interval == 0:
             checkpoint_path = out_dir / f"iter-{iter_num:06d}-ckpt.pth"
             save_lora_checkpoint(fabric, model, checkpoint_path)
